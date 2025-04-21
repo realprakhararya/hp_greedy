@@ -1,0 +1,295 @@
+How the Greedy VM Allocation Algorithm Works
+Your output shows a perfect example of the VM allocation algorithm in action. Let me break down exactly what happened in this specific case and then explain the general algorithm.
+What Happened in Your Example:
+Initial state:
+
+Server 1: [VM(4), VM(2)] - Using 6 units, 4 free
+Server 2: [VM(8)] - Using 8 units, 2 free
+
+Then you tried to add VM(6), and the final state became:
+
+Server 1: [VM(4), VM(6)] - Using 10 units, 0 free
+Server 2: [VM(8), VM(2)] - Using 10 units, 0 free
+
+Here's the step-by-step of what happened:
+
+The algorithm first tried to place VM(6) in an existing server:
+
+Server 1 has 4 free space, which isn't enough for VM(6)
+Server 2 has 2 free space, which isn't enough for VM(6)
+
+
+Since direct placement failed, the algorithm tried VM relocations:
+
+It temporarily removed VM(2) from Server 1
+Server 1 now had 6 free space, so VM(6) could fit there
+It then needed to place the removed VM(2) somewhere
+Server 2 had 2 free space, exactly enough for VM(2)
+The relocation was successful, so VM(6) stayed on Server 1 and VM(2) moved to Server 2
+
+
+This optimal rearrangement allowed both servers to be fully utilized (both at 10/10 capacity).
+
+The General Algorithm:
+The algorithm follows these steps:
+
+Direct Placement: Try to place a new VM on an existing server that has enough space.
+pythondef try_allocate_to_existing(servers, vm):
+    for server in servers:
+        if server.allocate_vm(vm, LIMIT_RATIO):
+            return True
+    return False
+
+VM Relocation: If direct placement fails, try relocating existing VMs:
+
+For each existing VM across all servers:
+
+Temporarily remove the VM from its server
+Try to place the new VM in the freed-up space
+If successful, try to place the removed VM somewhere else
+If both placements succeed, the relocation is complete
+If either fails, restore the original VM to its original position
+
+
+
+
+New Server Creation: If no successful placement or relocation is possible:
+
+Create a new server
+Place the new VM on the new server
+
+
+
+The algorithm is "greedy" because it:
+
+Always tries the simplest solution first (direct placement)
+When considering relocations, it takes the first successful relocation it finds without evaluating all possible relocations to find a global optimum
+Only creates a new server as a last resort
+
+This type of bin-packing algorithm is especially effective for real-time resource allocation where quick decisions are needed without the computational expense of finding the theoretical optimum solution.
+
+
+
+1. vm.py
+vm.py defines the fundamental building block of the system - the Virtual Machine (VM) class.
+pythonclass VM:
+    def __init__(self, memory: int):
+        self.memory = memory
+
+    def __repr__(self):
+        return f"VM({self.memory})"
+
+    def size(self):
+        return self.memory
+This class represents a virtual machine with memory requirements:
+
+Initialization: Each VM is created with a specific memory requirement.
+__repr__: Provides a string representation of the VM showing its memory size, used for debugging and display purposes.
+size(): Returns the memory requirement of the VM, which is crucial for the allocation algorithm to determine where the VM can fit.
+
+The VM class is intentionally kept simple, focusing solely on memory requirements. In a real-world scenario, this class might include additional properties like CPU cores, disk space, network requirements, etc.
+2. server.py
+server.py defines the Server class, which manages a collection of VMs within a specific capacity constraint:
+pythonfrom vm import VM
+
+class Server:
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.allocated = []
+
+    def __repr__(self):
+        return f"Server(Capacity: {self.capacity}, Used: {self.used_memory()}, Free: {self.free_space()}, VMs: {self.allocated})"
+
+    def used_memory(self):
+        return sum(vm.size() for vm in self.allocated)
+
+    def free_space(self):
+        return self.capacity - self.used_memory()
+
+    def can_allocate(self, vm: VM, limit_ratio: float = 1.0):
+        return vm.size() <= self.capacity * limit_ratio - self.used_memory()
+
+    def allocate_vm(self, vm: VM, limit_ratio: float = 1.0):
+        if self.can_allocate(vm, limit_ratio):
+            self.allocated.append(vm)
+            return True
+        return False
+
+    def remove_vm(self, vm: VM):
+        self.allocated.remove(vm)
+
+    def clear(self):
+        self.allocated.clear()
+
+Initialization: Each server is created with a fixed capacity (maximum memory).
+__repr__: Provides a detailed string representation showing capacity, used memory, free space, and allocated VMs.
+Memory Management:
+
+used_memory(): Calculates total memory used by summing up all VM sizes.
+free_space(): Calculates remaining available memory.
+
+
+VM Operations:
+
+can_allocate(): Determines if a VM can fit on the server based on:
+
+The VM's size
+The server's capacity
+A limit ratio that can restrict usable capacity (e.g., keeping 10% in reserve)
+
+
+allocate_vm(): Attempts to add a VM to the server if space permits.
+remove_vm(): Removes a specific VM from the server.
+clear(): Removes all VMs from the server.
+
+
+
+The Server class enforces capacity constraints and provides the necessary operations for the allocation algorithm to manipulate VM placements.
+3. allocator.py
+allocator.py contains the core allocation logic that determines how VMs are distributed across servers:
+pythonfrom server import Server
+from vm import VM
+from config import LIMIT_RATIO
+
+def try_allocate_to_existing(servers, vm):
+    for server in servers:
+        if server.allocate_vm(vm, LIMIT_RATIO):
+            return True
+    return False
+
+def greedy_allocate(servers: list[Server], new_vm: VM):
+    if try_allocate_to_existing(servers, new_vm):
+        return servers
+    
+    vm_mappings = []
+    for server in servers:
+        for vm in server.allocated:
+            vm_mappings.append((server, vm))
+    
+    for server, vm in vm_mappings:
+        server.remove_vm(vm)
+        
+        if try_allocate_to_existing(servers, new_vm):
+            if try_allocate_to_existing(servers, vm):
+                return servers
+            
+            for s in servers:
+                if new_vm in s.allocated:
+                    s.remove_vm(new_vm)
+                    break
+            
+        server.allocate_vm(vm)
+    
+    new_server = Server(servers[0].capacity)
+    new_server.allocate_vm(new_vm, LIMIT_RATIO)
+    servers.append(new_server)
+    return servers
+This file implements a greedy bin-packing algorithm with two key functions:
+
+try_allocate_to_existing():
+
+A helper function that attempts to place a VM on any existing server
+Iterates through servers in their original order
+Returns True if placement succeeds, False otherwise
+This function embodies the "first-fit" approach to greedy allocation
+
+
+greedy_allocate():
+
+The main allocation algorithm that uses multiple strategies:
+
+
+Direct Placement (lines 9-10):
+
+First tries to place the new VM directly on an existing server
+If successful, returns immediately
+
+
+VM Relocation (lines 12-27):
+
+Creates a list of all (server, VM) pairs across all servers
+For each pair, tries:
+
+Removing the existing VM
+Placing the new VM in the freed space
+Finding a place for the removed VM
+
+
+If both placements succeed, returns the new configuration
+Otherwise, restores the original configuration and tries the next pair
+This effectively tries all possible single-VM relocations
+
+
+New Server Creation (lines 29-32):
+
+As a last resort, creates a new server with the same capacity
+Places the new VM on this server
+Adds the new server to the server list
+
+
+
+
+
+The algorithm employs a multi-level greedy approach - it takes the first successful placement at each level of strategy (direct placement, single relocation, new server) without exploring all possible combinations or optimizing globally.
+4. main.py
+main.py provides the user interface and orchestrates the system components:
+pythonfrom server import Server
+from vm import VM
+from allocator import greedy_allocate
+from config import DEFAULT_SERVER_CAPACITY
+
+def print_servers(servers):
+    print("\nCurrent Server States:")
+    for i, s in enumerate(servers):
+        print(f"S{i + 1}: {s}")
+
+def main():
+    servers = [Server(DEFAULT_SERVER_CAPACITY)]
+
+    print("Enter CPU requirements for VMs (type 'exit' to stop):")
+    while True:
+        entry = input("New VM > ")
+        if entry.lower() == 'exit':
+            break
+        try:
+            mem = int(entry)
+            vm = VM(mem)
+            servers = greedy_allocate(servers, vm)
+            print_servers(servers)
+        except ValueError:
+            print("Invalid input. Please enter an integer.")
+
+if __name__ == '__main__':
+    main()
+This file ties everything together:
+
+Initialization:
+
+Creates the initial server with the default capacity
+
+
+Input Loop:
+
+Continuously prompts for VM memory requirements
+Creates VM objects
+Calls the allocation algorithm
+Displays the updated server states
+
+
+Display Logic:
+
+print_servers() shows the current state of all servers with enumeration
+This gives visibility into how the allocation algorithm is working
+
+
+
+In summary, main.py serves as the entry point and provides a simple command-line interface for interacting with the VM allocation system.
+System as a Whole
+Together, these files implement a dynamic VM allocation system that:
+
+Models VMs with memory requirements
+Models servers with capacity constraints
+Implements a multi-strategy greedy allocation algorithm
+Provides an interactive interface for testing and demonstration
+
+The system demonstrates principles of resource allocation, bin-packing algorithms, and object-oriented design in a practical context similar to real-world cloud resource management systems.
