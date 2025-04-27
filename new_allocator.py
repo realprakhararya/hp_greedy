@@ -9,9 +9,8 @@ def try_allocate_to_existing(servers, vm):
             return True
     return False
 
-# Original greedy algorithm with reassignment and fixed pool
 def greedy_allocate(servers: list[Server], new_vm: VM):
-    # Try to allocate to existing servers first
+    # allocate to existing servers first if possible
     if try_allocate_to_existing(servers, new_vm):
         return True
     
@@ -22,18 +21,22 @@ def greedy_allocate(servers: list[Server], new_vm: VM):
             vm_mappings.append((server, vm))
     
     for server, vm in vm_mappings:
+        # Remove the original VM
         server.remove_vm(vm)
         
-        if try_allocate_to_existing(servers, new_vm):
+        # Try to allocate the new VM
+        new_vm_server = None
+        for s in servers:
+            if s.can_allocate(new_vm):
+                s.allocate_vm(new_vm)
+                new_vm_server = s
+                break
+        
+        if new_vm_server:
+            # Try to allocate the original VM somewhere
             if try_allocate_to_existing(servers, vm):
                 return True
-            
-            # If we can't allocate the original VM, restore state
-            for s in servers:
-                if new_vm in s.allocated:
-                    s.remove_vm(new_vm)
-                    break
-            
+            new_vm_server.remove_vm(new_vm)
         server.allocate_vm(vm)
     
     # If we reach here, we couldn't allocate even with reassignment
