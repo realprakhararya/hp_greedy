@@ -1,6 +1,8 @@
 from server import Server
 from vm import VM
 from config import LIMIT_RATIO, POOL
+import random
+from collections import deque
 
 def try_allocate_to_existing(servers, vm):
     """Try to allocate a VM to any existing server."""
@@ -139,3 +141,91 @@ def weight_balanced_allocate(servers: list[Server], new_vm: VM):
     
     # If no suitable server found
     return False
+def best_fit_epsilon_greedy_allocate(servers: list[Server], new_vm: VM, epsilon: float = 0.7):
+    """
+    Epsilon-Greedy Best Fit allocation:
+    - With probability (1-epsilon): Chooses best-fit server (minimizes remaining space)
+    - With probability epsilon: Randomly selects any valid server
+    Returns True if allocation succeeded, False otherwise
+    """
+    # Find all servers that can accommodate the VM
+    valid_servers = [s for s in servers if s.can_allocate(new_vm, LIMIT_RATIO)]
+    
+    if not valid_servers:
+        return False  # No servers can accommodate this VM
+
+    # With probability epsilon, explore (choose random valid server)
+    if random.random() < epsilon:
+        chosen_server = random.choice(valid_servers)
+        print("Allocating randomly:")
+        return chosen_server.allocate_vm(new_vm, LIMIT_RATIO)
+    
+    # Otherwise exploit (use best-fit strategy)
+    best_server = None
+    min_remaining = float('inf')
+    
+    for server in valid_servers:
+        remaining = server.free_space() - new_vm.size()
+        if remaining < min_remaining:
+            min_remaining = remaining
+            best_server = server
+    
+    if best_server:
+        print("Allocating best fit:")
+        return best_server.allocate_vm(new_vm, LIMIT_RATIO)
+    
+    return False  # Should never reach here if valid_servers isn't empty
+
+def delayed_bin_packing_allocate(servers: list[Server], new_vm: VM, wait_k=3):
+    """
+    Delayed bin packing with 2-sum matching:
+    1. First tries to match with existing server's exact remaining capacity
+    2. Then tries to match with waiting VMs that sum to server capacity
+    3. Otherwise holds VM in queue until wait threshold is reached
+    """
+    # Convert servers to remaining capacities
+    remaining = [s.free_space() for s in servers]
+    waiting_queue = deque()  # Stores (vm, wait_count)
+    
+    # Static variable to maintain queue across calls
+    if not hasattr(delayed_bin_packing_allocate, "global_waiting_queue"):
+        delayed_bin_packing_allocate.global_waiting_queue = deque()
+    waiting_queue = delayed_bin_packing_allocate.global_waiting_queue
+    
+    # Step 1: Try exact remaining match
+    for i, rem in enumerate(remaining):
+        if rem == new_vm.size():
+            if servers[i].allocate_vm(new_vm, LIMIT_RATIO):
+                return True
+    
+    # Step 2: Try 2-sum match with waiting VMs
+    for idx, (waiting_vm, _) in enumerate(waiting_queue):
+        if new_vm.size() + waiting_vm.size() == servers[0].capacity:  # All servers same capacity
+            # Find a server that can fit both
+            for server in servers:
+                if server.can_allocate(new_vm, LIMIT_RATIO) and server.can_allocate(waiting_vm, LIMIT_RATIO):
+                    server.allocate_vm(new_vm, LIMIT_RATIO)
+                    server.allocate_vm(waiting_vm, LIMIT_RATIO)
+                    del waiting_queue[idx]
+                    return True
+    
+    # Step 3: Add to waiting queue
+    waiting_queue.append((new_vm, 0))
+    
+    # Step 4: Process waiting queue
+    updated_queue = deque()
+    for vm, wait_count in waiting_queue:
+        wait_count += 1
+        if wait_count >= wait_k:
+            # First Fit allocation for waited-too-long VMs
+            for server in servers:
+                if server.can_allocate(vm, LIMIT_RATIO):
+                    server.allocate_vm(vm, LIMIT_RATIO)
+                    break
+            else:
+                return False  # Couldn't allocate even after waiting
+        else:
+            updated_queue.append((vm, wait_count))
+    
+    delayed_bin_packing_allocate.global_waiting_queue = updated_queue
+    return True  # Holding in queue counts as temporary success

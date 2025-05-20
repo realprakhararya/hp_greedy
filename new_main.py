@@ -5,7 +5,9 @@ from new_allocator import (
     first_fit_allocate, 
     best_fit_allocate, 
     next_fit_allocate,
-    weight_balanced_allocate
+    weight_balanced_allocate,
+    best_fit_epsilon_greedy_allocate,
+    delayed_bin_packing_allocate
 )
 from config import DEFAULT_SERVER_CAPACITY, POOL
 
@@ -27,11 +29,13 @@ def main():
     print("3. Best Fit")
     print("4. Next Fit")
     print("5. Weight Balanced")
+    print("6. Epsilon Greedy Best Fit")
+    print("7. Delayed Bin Packing")
     print(f"\nFixed Server Pool Size: {POOL}")
     
     try:
-        algorithm = int(input("Select algorithm (1-5): "))
-        if algorithm not in range(1, 6):
+        algorithm = int(input("Select algorithm (1-7): "))
+        if algorithm not in range(1, 8):
             print("Invalid selection, defaulting to Best Fit (3)")
             algorithm = 3
     except ValueError:
@@ -43,7 +47,9 @@ def main():
         2: "First Fit",
         3: "Best Fit", 
         4: "Next Fit",
-        5: "Weight Balanced"
+        5: "Weight Balanced",
+        6: "Best Fit Epsilon Greedy",
+        7: "Delayed Bin Packing"
     }
     
     print(f"\nUsing {algorithm_names[algorithm]} allocation strategy")
@@ -70,7 +76,10 @@ def main():
                 last_used_index, success = next_fit_allocate(servers, vm, last_used_index)
             elif algorithm == 5:
                 success = weight_balanced_allocate(servers, vm)
-            
+            elif algorithm == 6:
+                success = best_fit_epsilon_greedy_allocate(servers,vm)
+            elif algorithm == 7:
+                success = delayed_bin_packing_allocate(servers,vm)
             if success:
                 print(f"Successfully allocated VM({mem})")
             else:
