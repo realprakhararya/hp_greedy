@@ -176,56 +176,63 @@ def best_fit_epsilon_greedy_allocate(servers: list[Server], new_vm: VM, epsilon:
     
     return False  # Should never reach here if valid_servers isn't empty
 
-def delayed_bin_packing_allocate(servers: list[Server], new_vm: VM, wait_k=3):
+from collections import deque
+
+def delayed_bin_packing_allocate(servers: list, new_vm, wait_k=3):
     """
-    Delayed bin packing with 2-sum matching:
-    1. First tries to match with existing server's exact remaining capacity
-    2. Then tries to match with waiting VMs that sum to server capacity
-    3. Otherwise holds VM in queue until wait threshold is reached
+    Delayed bin packing with 2-sum matching and forced first-fit flush:
+    1. If new_vm.size() == 0: force allocate all waiting VMs using first-fit
+    2. Else:
+        a. Try exact match
+        b. Try 2-sum match
+        c. Else add to wait queue and wait until wait_k rounds
     """
-    # Convert servers to remaining capacities
-    remaining = [s.free_space() for s in servers]
-    waiting_queue = deque()  # Stores (vm, wait_count)
-    
-    # Static variable to maintain queue across calls
+
+    # Initialize static wait queue
     if not hasattr(delayed_bin_packing_allocate, "global_waiting_queue"):
         delayed_bin_packing_allocate.global_waiting_queue = deque()
+
     waiting_queue = delayed_bin_packing_allocate.global_waiting_queue
-    
-    # Step 1: Try exact remaining match
-    for i, rem in enumerate(remaining):
-        if rem == new_vm.size():
-            if servers[i].allocate_vm(new_vm, LIMIT_RATIO):
+
+    # 🔁 Special case: force allocate all waiting VMs using first-fit
+    if new_vm.size() == 0:
+        updated_queue = deque()
+        for vm, wait_count in waiting_queue:
+            allocated = first_fit_allocate(servers, vm)
+            if not allocated:
+                updated_queue.append((vm, wait_count + 1))  # couldn't allocate yet
+        delayed_bin_packing_allocate.global_waiting_queue = updated_queue
+        return True
+
+    # Step 1: Try exact match with any server
+    for server in servers:
+        if server.free_space() == new_vm.size():
+            if server.allocate_vm(new_vm, LIMIT_RATIO):
                 return True
-    
+
     # Step 2: Try 2-sum match with waiting VMs
     for idx, (waiting_vm, _) in enumerate(waiting_queue):
-        if new_vm.size() + waiting_vm.size() == servers[0].capacity:  # All servers same capacity
-            # Find a server that can fit both
+        if new_vm.size() + waiting_vm.size() == servers[0].capacity:  # assuming uniform capacity
             for server in servers:
                 if server.can_allocate(new_vm, LIMIT_RATIO) and server.can_allocate(waiting_vm, LIMIT_RATIO):
                     server.allocate_vm(new_vm, LIMIT_RATIO)
                     server.allocate_vm(waiting_vm, LIMIT_RATIO)
                     del waiting_queue[idx]
                     return True
-    
+
     # Step 3: Add to waiting queue
     waiting_queue.append((new_vm, 0))
-    
-    # Step 4: Process waiting queue
+
+    # Step 4: Process existing wait queue for expired wait_k
     updated_queue = deque()
     for vm, wait_count in waiting_queue:
         wait_count += 1
         if wait_count >= wait_k:
-            # First Fit allocation for waited-too-long VMs
-            for server in servers:
-                if server.can_allocate(vm, LIMIT_RATIO):
-                    server.allocate_vm(vm, LIMIT_RATIO)
-                    break
-            else:
-                return False  # Couldn't allocate even after waiting
+            allocated = first_fit_allocate(servers, vm)
+            if not allocated:
+                updated_queue.append((vm, wait_count))  # stay in queue
         else:
             updated_queue.append((vm, wait_count))
-    
+
     delayed_bin_packing_allocate.global_waiting_queue = updated_queue
-    return True  # Holding in queue counts as temporary success
+    return True
