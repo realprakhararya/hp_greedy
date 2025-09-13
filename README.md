@@ -9,7 +9,7 @@ It forms the **foundation** for the later version built with **Flask REST endpoi
 
 The project explores **heuristic-based placement and migration of Virtual Machines (VMs)** across physical hosts, focusing on resource optimization and efficient utilization.  
 
-For this stage, the implementation is simulation-oriented and **does not include libvirt integration or REST APIs**. Instead, it demonstrates the **core greedy algorithm** used to allocate VMs to hosts based on available resources. The KVM version is pivated for security reasons.
+For this stage, the implementation is simulation-oriented and **does not include libvirt integration or REST APIs**. Instead, it demonstrates the **core greedy algorithm** used to allocate VMs to hosts based on available resources.This repository represents the preliminary open-source version. The production-ready KVM + libvirt implementation has been pivoted to a private repository to ensure safe infrastructure handling and maintaining compliance guildlines.
 
 ---
 
